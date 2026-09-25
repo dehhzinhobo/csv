@@ -5,11 +5,18 @@
 <div id="work" class="hidden"><div class="card"><div class="row"><b style="flex:1">Propriedades</b><button id="add">+ Adicionar</button><button id="save">Salvar configuração</button></div><div id="maps"></div></div>
 <div class="card metrics"><div class="metric">Income<b id="inc">R$ 0,00</b></div><div class="metric">Expense<b id="exp">R$ 0,00</b></div><div class="metric">Income − Expense<b id="net">R$ 0,00</b></div></div>
 <div class="card"><b>Pré-visualização</b><div class="scroll"><table><thead id="head"></thead><tbody id="body"></tbody></table></div></div>
-<div class="row" style="justify-content:flex-end"><button class="primary" id="dl">Baixar CSV pronto</button><button id="openOutside">Abrir fora do Notion</button><span id="exportStatus" class="muted"></span></div></div>
+<div class="row" style="justify-content:flex-end"><button class="primary" id="dl">Baixar CSV pronto</button><button id="openOutside">Abrir para exportar</button><span id="exportStatus" class="muted"></span></div></div>
 <script>
 const $=s=>document.querySelector(s);let rows=[],heads=[],out=[];
 const defs=[["Name","source","Descrição"],["Date","source","Data"],["Income","income","Valor"],["Expense","expense","Valor"],["Type","type","Valor"],["Description","source","Descrição"]];
-let map=JSON.parse(localStorage.getItem("notionCsvMap")||"null")||defs.map(x=>({name:x[0],mode:x[1],value:x[2]}));
+function configFromURL(){
+  try{
+    const raw=new URLSearchParams(location.search).get("config");
+    if(!raw)return null;
+    return JSON.parse(decodeURIComponent(escape(atob(raw))));
+  }catch(e){return null}
+}
+let map=configFromURL()||JSON.parse(localStorage.getItem("notionCsvMap")||"null")||defs.map(x=>({name:x[0],mode:x[1],value:x[2]}));
 function parse(t){let A=[],r=[],v="",q=false;for(let i=0;i<t.length;i++){let c=t[i],n=t[i+1];if(c=='"'&&q&&n=='"'){v+='"';i++}else if(c=='"')q=!q;else if(c==','&&!q){r.push(v);v=""}else if((c=='\n'||c=='\r')&&!q){if(c=='\r'&&n=='\n')i++;r.push(v);v="";if(r.some(Boolean))A.push(r);r=[]}else v+=c}if(v||r.length){r.push(v);A.push(r)}let h=A.shift().map(x=>x.trim());return[h,A.map(a=>Object.fromEntries(h.map((k,i)=>[k,a[i]||""])))]}
 function num(v){let s=String(v||"").trim().replace(/R\$/g,"").replace(/\s/g,"");if(s.includes(",")&&s.includes("."))s=s.lastIndexOf(",")>s.lastIndexOf(".")?s.replace(/\./g,"").replace(",","."):s.replace(/,/g,"");else if(s.includes(","))s=s.replace(",",".");let n=Number(s);return isFinite(n)?n:0}
 function esc(s){return String(s??"").replace(/[&<>"]/g,x=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[x]))}
@@ -17,5 +24,14 @@ function opts(v){return heads.map(h=>`<option ${h==v?"selected":""}>${esc(h)}</o
 function draw(){maps.innerHTML=map.map((m,i)=>`<div class=map><input data-i=${i} data-k=name value="${esc(m.name)}"><select data-i=${i} data-k=mode><option value=source ${m.mode=="source"?"selected":""}>Coluna original</option><option value=income ${m.mode=="income"?"selected":""}>Positivo → Income</option><option value=expense ${m.mode=="expense"?"selected":""}>Negativo → Expense</option><option value=type ${m.mode=="type"?"selected":""}>Income / Expense</option><option value=fixed ${m.mode=="fixed"?"selected":""}>Valor fixo</option></select>${m.mode=="fixed"?`<input data-i=${i} data-k=value value="${esc(m.value)}">`:`<select data-i=${i} data-k=value>${opts(m.value)}</select>`}<button data-del=${i}>×</button></div>`).join("");document.querySelectorAll("[data-i]").forEach(e=>e.onchange=x=>{map[+e.dataset.i][e.dataset.k]=e.value;draw();go()});document.querySelectorAll("[data-del]").forEach(e=>e.onclick=()=>{map.splice(+e.dataset.del,1);draw();go()})}
 function go(){out=rows.map(r=>Object.fromEntries(map.map(m=>{let n=num(r[m.value]),v=m.mode=="source"?(r[m.value]||""):m.mode=="fixed"?m.value:m.mode=="income"?(n>0?n.toFixed(2):"0.00"):m.mode=="expense"?(n<0?Math.abs(n).toFixed(2):"0.00"):n>0?"Income":n<0?"Expense":"";return[m.name,v]})));let cols=map.map(m=>m.name);head.innerHTML="<tr>"+cols.map(c=>`<th>${esc(c)}</th>`).join("")+"</tr>";body.innerHTML=out.slice(0,100).map(r=>"<tr>"+cols.map(c=>`<td>${esc(r[c])}</td>`).join("")+"</tr>").join("");let I=out.reduce((s,r)=>s+num(r.Income),0),E=out.reduce((s,r)=>s+num(r.Expense),0),fmt=n=>new Intl.NumberFormat("pt-BR",{style:"currency",currency:"BRL"}).format(n);inc.textContent=fmt(I);exp.textContent=fmt(E);net.textContent=fmt(I-E)}
 async function load(f){let [h,r]=parse(await f.text());heads=h;rows=r;fn.textContent=f.name;work.classList.remove("hidden");draw();go()}
-drop.onclick=()=>file.click();file.onchange=e=>e.target.files[0]&&load(e.target.files[0]);drop.ondragover=e=>e.preventDefault();drop.ondrop=e=>{e.preventDefault();e.dataTransfer.files[0]&&load(e.dataTransfer.files[0])};add.onclick=()=>{map.push({name:"Bank",mode:"fixed",value:"Nubank"});draw();go()};save.onclick=()=>{localStorage.setItem("notionCsvMap",JSON.stringify(map));save.textContent="Salvo ✓";setTimeout(()=>save.textContent="Salvar configuração",1000)};openOutside.onclick=()=>window.open(location.href,"_blank");dl.onclick=()=>{let c=map.map(m=>m.name),cell=v=>/[",\n]/.test(v=String(v??""))?'"'+v.replace(/"/g,'""')+'"':v,csv=[c.join(","),...out.map(r=>c.map(k=>cell(r[k])).join(","))].join("\r\n"),a=document.createElement("a");a.href=URL.createObjectURL(new Blob(["\ufeff"+csv],{type:"text/csv"}));a.download="notion_import.csv";a.click()}
+drop.onclick=()=>file.click();file.onchange=e=>e.target.files[0]&&load(e.target.files[0]);drop.ondragover=e=>e.preventDefault();drop.ondrop=e=>{e.preventDefault();e.dataTransfer.files[0]&&load(e.dataTransfer.files[0])};add.onclick=()=>{map.push({name:"Bank",mode:"fixed",value:"Nubank"});draw();go()};save.onclick=()=>{localStorage.setItem("notionCsvMap",JSON.stringify(map));save.textContent="Salvo ✓";setTimeout(()=>save.textContent="Salvar configuração",1000)};openOutside.onclick=()=>{
+  try{
+    const config = btoa(unescape(encodeURIComponent(JSON.stringify(map))));
+    const url = new URL(location.href);
+    url.searchParams.set("config", config);
+    window.open(url.toString(), "_blank");
+  }catch(e){
+    window.open(location.href, "_blank");
+  }
+};dl.onclick=()=>{let c=map.map(m=>m.name),cell=v=>/[",\n]/.test(v=String(v??""))?'"'+v.replace(/"/g,'""')+'"':v,csv=[c.join(","),...out.map(r=>c.map(k=>cell(r[k])).join(","))].join("\r\n"),a=document.createElement("a");a.href=URL.createObjectURL(new Blob(["\ufeff"+csv],{type:"text/csv"}));a.download="notion_import.csv";a.click()}
 </script></body></html>
